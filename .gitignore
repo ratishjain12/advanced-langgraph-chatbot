@@ -1,3 +1,33 @@
+# Environments
 .env
 .env.*
 .venv/
+venv/
+env/
+ENV/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Mac OS
+.DS_Store
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vscode/
+.idea/
+*.swp
+*.core
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Streamlit
+/.streamlit/secrets.toml
