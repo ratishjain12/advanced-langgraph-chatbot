@@ -1,6 +1,6 @@
 import streamlit as st
 from langchain_core.messages import HumanMessage
-from chatbot.backend.langgraph_backend import chatbot
+from chatbot.backend.langgraph_backend import chatbot, retrieve_all_threads
 import uuid
 
 # utilities
@@ -19,9 +19,13 @@ def add_thread(thread_id):
 
 def load_thread(thread_id):
     st.session_state['thread_id'] = thread_id
-    return chatbot.get_state(config={'configurable': {
+    state = chatbot.get_state(config={'configurable': {
         'thread_id': thread_id
-    }}).values['messages']
+    }})
+
+    if 'messages' in state.values:
+        return state.values['messages']
+    return []
 
 # streamlit ui
 def main():
@@ -29,14 +33,26 @@ def main():
     # session management
     if 'message_history' not in st.session_state:
         st.session_state['message_history'] = []
-    
-    if 'thread_id' not in st.session_state:
-        st.session_state['thread_id'] = generate_thread_id()
 
     if "chat_threads" not in st.session_state:
-        st.session_state['chat_threads'] = []
+        st.session_state['chat_threads'] = retrieve_all_threads()
 
-    add_thread(st.session_state['thread_id'])
+    if 'thread_id' not in st.session_state:
+        if st.session_state['chat_threads']:
+            # Restore the most recent existing thread instead of creating a new one
+            most_recent_thread = st.session_state['chat_threads'][-1]
+            st.session_state['thread_id'] = most_recent_thread
+            st.session_state['message_history'] = load_thread(most_recent_thread)
+            # Convert LangChain messages to display format
+            temp_messages = []
+            for message in st.session_state['message_history']:
+                role = 'user' if isinstance(message, HumanMessage) else 'assistant'
+                temp_messages.append({'role': role, 'content': message.content})
+            st.session_state['message_history'] = temp_messages
+        else:
+            # No threads exist yet — create the first one
+            st.session_state['thread_id'] = generate_thread_id()
+            st.session_state['chat_threads'].append(st.session_state['thread_id'])
 
     # sidebar
     st.sidebar.title("Advance Langgraph Chatbot")
