@@ -1,5 +1,6 @@
 import streamlit as st
-from langchain_core.messages import HumanMessage
+import json
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from chatbot.backend.langgraph_backend import chatbot, retrieve_all_threads
 import uuid
 
@@ -78,14 +79,14 @@ def main():
     # chat ui
     for message in st.session_state['message_history']:
         with st.chat_message(message['role']):
-            st.text(message['content'])
+            st.markdown(message['content'])
 
     user_input = st.chat_input('Type here')
 
     if user_input:
         st.session_state['message_history'].append({'role': 'user', 'content': user_input})
         with st.chat_message("user"):
-            st.text(user_input)
+            st.markdown(user_input)
 
         config = {'configurable': {
                         'thread_id': st.session_state['thread_id']
@@ -97,11 +98,85 @@ def main():
                 }
 
         with st.chat_message("assistant"):
-            ai_message = st.write_stream(
-                message_chunk.content for message_chunk, metadata in chatbot.stream(
-                    {'messages': [HumanMessage(content=user_input)]},
-                    config= config,
-                    stream_mode= "messages"
-                )
+            # tool_placeholder created FIRST → renders ABOVE answer text
+            tool_placeholder = st.empty()
+            answer_placeholder = st.empty()
+
+            full_response = ""
+            # tool_info[index] = {"id": str, "name": str, "args_str": str}
+            tool_info = {}
+            # Maps tool_call_id -> index for ToolMessage lookup
+            id_to_index = {}
+            # Indices already shown as "running" (avoid duplicate renders)
+            rendered_running = set()
+
+            for message_chunk, metadata in chatbot.stream(
+                {'messages': [HumanMessage(content=user_input)]},
+                config=config,
+                stream_mode="messages"
+            ):
+                node = metadata.get("langgraph_node", "")
+
+                # ── chat_node: accumulate tool_call_chunks or stream text ────
+                if node == "chat_node" and isinstance(message_chunk, AIMessage):
+                    tc_chunks = getattr(message_chunk, "tool_call_chunks", [])
+
+                    if tc_chunks:
+                        for tc in tc_chunks:
+                            idx = tc.get("index", 0)
+                            if idx not in tool_info:
+                                tool_info[idx] = {"id": "", "name": "", "args_str": ""}
+                            # id and name arrive complete in the very first chunk
+                            if tc.get("id"):
+                                tool_info[idx]["id"] = tc["id"]
+                                id_to_index[tc["id"]] = idx
+                            if tc.get("name"):
+                                tool_info[idx]["name"] = tc["name"]
+                            # args are streamed char-by-char — accumulate them
+                            tool_info[idx]["args_str"] += tc.get("args", "")
+
+                            # Render "running" status ONCE when name is known
+                            if idx not in rendered_running and tool_info[idx]["name"]:
+                                rendered_running.add(idx)
+                                with tool_placeholder.container():
+                                    with st.status(
+                                        f"🔧 Calling: **{tool_info[idx]['name']}**",
+                                        state="running",
+                                        expanded=True,
+                                    ):
+                                        st.markdown("_Waiting for tool result..._")
+
+                    elif message_chunk.content:
+                        # Plain LLM text token — stream into answer_placeholder
+                        full_response += message_chunk.content
+                        answer_placeholder.markdown(full_response + "▌")
+
+                # ── tools node: update placeholder to complete with input+output
+                elif node == "tools" and isinstance(message_chunk, ToolMessage):
+                    tc_id = getattr(message_chunk, "tool_call_id", "")
+                    tool_output = message_chunk.content
+
+                    idx = id_to_index.get(tc_id, next(iter(tool_info), 0))
+                    info = tool_info.get(idx, {})
+                    tool_name = info.get("name") or getattr(message_chunk, "name", "Tool")
+
+                    # Parse the fully-accumulated args JSON
+                    try:
+                        args = json.loads(info.get("args_str", "{}"))
+                    except json.JSONDecodeError:
+                        args = {}
+
+                    # Replace the running status with completed: input + output
+                    with tool_placeholder.container():
+                        with st.status(f"🔧 **{tool_name}**", state="complete", expanded=True):
+                            st.markdown("**📥 Input:**")
+                            st.json(args)
+                            st.divider()
+                            st.markdown("**📤 Output:**")
+                            st.markdown(tool_output)
+
+            # Finalise — remove blinking cursor
+            answer_placeholder.markdown(full_response)
+            st.session_state['message_history'].append(
+                {'role': 'assistant', 'content': full_response}
             )
-            st.session_state['message_history'].append({'role': 'assistant', 'content': ai_message})
