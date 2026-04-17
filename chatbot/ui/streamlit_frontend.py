@@ -1,7 +1,7 @@
 import streamlit as st
 import json
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from chatbot.backend.langgraph_backend import chatbot, retrieve_all_threads
+from chatbot.backend.langgraph_backend import chatbot, retrieve_all_threads, stream_graph, get_thread_state
 import uuid
 
 # utilities
@@ -20,7 +20,7 @@ def add_thread(thread_id):
 
 def load_thread(thread_id):
     st.session_state['thread_id'] = thread_id
-    state = chatbot.get_state(config={'configurable': {
+    state = get_thread_state(config={'configurable': {
         'thread_id': thread_id
     }})
 
@@ -110,10 +110,9 @@ def main():
             # Indices already shown as "running" (avoid duplicate renders)
             rendered_running = set()
 
-            for message_chunk, metadata in chatbot.stream(
+            for message_chunk, metadata in stream_graph(
                 {'messages': [HumanMessage(content=user_input)]},
                 config=config,
-                stream_mode="messages"
             ):
                 node = metadata.get("langgraph_node", "")
 
