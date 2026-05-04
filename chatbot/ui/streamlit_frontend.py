@@ -1,7 +1,7 @@
 import streamlit as st
 import json
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from chatbot.backend.langgraph_backend import chatbot, retrieve_all_threads, stream_graph, get_thread_state
+from chatbot.backend.langgraph_backend import chatbot, retrieve_all_threads, stream_graph, get_thread_state, ingest_pdf
 import uuid
 
 # utilities
@@ -60,6 +60,23 @@ def main():
 
     if st.sidebar.button("New Chat"):
         reset_chat()
+
+    st.sidebar.header("Ingest PDF")
+
+    uploaded_file = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
+
+    if uploaded_file is not None:
+        if st.sidebar.button("Index Document"):
+            with st.spinner("Indexing document..."):
+                try:
+                    result = ingest_pdf(
+                        uploaded_file.read(),
+                        st.session_state['thread_id'],
+                        uploaded_file.name
+                    )
+                    st.sidebar.success(f"Indexed: {result['filename']} ({result['chunks']} chunks)")
+                except Exception as e:
+                    st.sidebar.error(f"Error: {e}")
 
     st.sidebar.header("My Conversations")
 
